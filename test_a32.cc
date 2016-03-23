@@ -1,34 +1,7 @@
-/* Copyright (C) 2013, David Eklov
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above
- *     copyright notice, this list of conditions and the following
- *     disclaimer in the documentation and/or other materials provided
- *     with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 #include <iostream>
 #include <cstring>
-
-#include "gdbserver.hh"
+#include <assert.h>
+#include "gdbserver.h"
 
 using namespace std;
 using namespace gdb;
@@ -42,12 +15,49 @@ using namespace gdb;
 #define DATA_SIZE               (16)
 #define DATA_END                (DATA_START + DATA_SIZE)
 
-class FakeARMv7Context : public Context {
+enum ARMv7_RegisterNames {
+	ARMv7_REG_R0 = 0,
+	ARMv7_REG_R1, ARMv7_REG_R2, ARMv7_REG_R3, ARMv7_REG_R4,
+	ARMv7_REG_R5, ARMv7_REG_R6, ARMv7_REG_R7, ARMv7_REG_R8,
+	ARMv7_REG_R9, ARMv7_REG_R10, ARMv7_REG_R11, ARMv7_REG_R12,
+	ARMv7_REG_SP, ARMv7_REG_LR, ARMv7_REG_PC, ARMv7_REG_F0,
+	ARMv7_REG_F1, ARMv7_REG_F2, ARMv7_REG_F3, ARMv7_REG_F4,
+	ARMv7_REG_F5, ARMv7_REG_F6, ARMv7_REG_F7, ARMv7_REG_FPS,
+	ARMv7_REG_CPSR,
+
+	ARMv7_NUM_REGS
+};
+
+/* TODO Move to .cc file and declare as extern */
+static const std::string armv7_xml_core =
+"<?xml version=\"1.0\"?>"
+"<!DOCTYPE feature SYSTEM \"gdb-target.dtd\">"
+"<feature name=\"org.gnu.gdb.arm.core\">"
+"  <reg name=\"r0\"   bitsize=\"32\"/>"
+"  <reg name=\"r1\"   bitsize=\"32\"/>"
+"  <reg name=\"r2\"   bitsize=\"32\"/>"
+"  <reg name=\"r3\"   bitsize=\"32\"/>"
+"  <reg name=\"r4\"   bitsize=\"32\"/>"
+"  <reg name=\"r5\"   bitsize=\"32\"/>"
+"  <reg name=\"r6\"   bitsize=\"32\"/>"
+"  <reg name=\"r7\"   bitsize=\"32\"/>"
+"  <reg name=\"r8\"   bitsize=\"32\"/>"
+"  <reg name=\"r9\"   bitsize=\"32\"/>"
+"  <reg name=\"r10\"  bitsize=\"32\"/>"
+"  <reg name=\"r11\"  bitsize=\"32\"/>"
+"  <reg name=\"r12\"  bitsize=\"32\"/>"
+"  <reg name=\"sp\"   bitsize=\"32\" type=\"data_ptr\"/>"
+"  <reg name=\"lr\"   bitsize=\"32\"/>"
+"  <reg name=\"pc\"   bitsize=\"32\" type=\"code_ptr\"/>"
+"  <reg name=\"cpsr\" bitsize=\"32\" regnum=\"25\"/>"
+"</feature>";
+
+class FakeARMv7Context : public Target {
 public:
     FakeARMv7Context()
-    : Context(ARMv7_NUM_REGS)
+    : Target(ARMv7_NUM_REGS)
     {
-        static char text_mem_[] = {
+        static unsigned char text_mem_[] = {
             0x04, 0xb0, 0x2d, 0xe5,  /* 8394:  push  {fp}            */
             0x00, 0xb0, 0x8d, 0xe2,  /* 8398:  add   fp, sp, #0      */
             0x14, 0xd0, 0x4d, 0xe2,  /* 839c:  sub   sp, sp, #20     */
@@ -68,7 +78,7 @@ public:
         put_reg(regs[reg_no]);
     }
 
-    void wr_reg(int reg_no, unsigned long long value)
+	void wr_reg(int reg_no, addr_type value)
     {
         assert(0 <= reg_no && reg_no < ARMv7_NUM_REGS);
         regs[reg_no] = value;
@@ -138,20 +148,22 @@ private:
     typedef std::set<addr_type> breakpoint_set_t;
     breakpoint_set_t breakpoint_set;
 
-    char *text_mem;
+    unsigned char *text_mem;
     char data_mem[DATA_SIZE];
 };
 
 int
 main(int argc, char **argv)
 {
+	WSADATA wsaData;
+	WSAStartup(MAKEWORD(2, 0), &wsaData);
     FakeARMv7Context *ctx = new FakeARMv7Context();
-    context_ptr ctx_ptr = context_ptr(ctx);
+    target_ptr ctx_ptr = target_ptr(ctx);
 
     Server server(ctx_ptr);
 
     try {
-        Server::addr_type pc = TEXT_START;
+        addr_type pc = TEXT_START;
 
         do {
             ctx->regs[ARMv7_REG_PC] = pc;
