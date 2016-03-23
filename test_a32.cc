@@ -2,6 +2,7 @@
 #include <cstring>
 #include <assert.h>
 #include "gdbserver.h"
+#include "win32_x86.h"
 
 using namespace std;
 using namespace gdb;
@@ -72,19 +73,21 @@ public:
         regs[ARMv7_REG_PC] = TEXT_START;
     }
 
-    void rd_reg(int reg_no)
+	int rd_reg(int reg_no)
     {
         assert(0 <= reg_no && reg_no < ARMv7_NUM_REGS);
         put_reg(regs[reg_no]);
+		return 0;
     }
 
-	void wr_reg(int reg_no, addr_type value)
+	int wr_reg(int reg_no, addr_type value)
     {
         assert(0 <= reg_no && reg_no < ARMv7_NUM_REGS);
         regs[reg_no] = value;
+		return 0;
     }
 
-    void rd_mem(addr_type addr)
+	int rd_mem(addr_type addr)
     {
         if (TEXT_START <= addr && addr <= TEXT_END) {
             addr -= TEXT_START;
@@ -94,45 +97,51 @@ public:
             put_mem(data_mem[addr]);
         } else 
             put_mem(0);
+
+		return 0;
     }
 
-    bool wr_mem(addr_type addr, char data)
+	int wr_mem(addr_type addr, char data)
     {
         if (DATA_START <= addr && addr < DATA_END) {
             addr -= DATA_START;
             data_mem[addr] = data;
-            return true;
+            return 0;
         } else
-            return false;
+            return -1;
     }
 
     int num_regs(void)
     {
         return ARMv7_NUM_REGS;
     }
-       
+
     const std::string& xml_core(void)
     {
         return armv7_xml_core;
     }
 
-    void set_breakpoint(addr_type addr, size_type size)
+	int set_breakpoint(addr_type addr, size_type size)
     {
         for (size_type i = 0; i < size; i ++) {
             assert(breakpoint_set.count(addr + i) == 0);
             breakpoint_set.insert(addr + i);
         }
+
+		return 0;
     }
 
-    void del_breakpoint(addr_type addr, size_type size)
+	int del_breakpoint(addr_type addr, size_type size)
     {
         for (size_type i = 0; i < size; i ++) {
             assert(breakpoint_set.count(addr + i) == 1);
             breakpoint_set.erase(addr + i);
         }
+
+		return 0;
     }
 
-    bool has_breakpoint(addr_type addr, size_type size)
+	bool has_breakpoint(addr_type addr, size_type size)
     {
         int c = 0;
         for (size_type i = 0; i < size; i++)
@@ -140,6 +149,10 @@ public:
         return c > 0;
     }
 
+	int query(const std::string& type)
+	{
+		return 0;
+	}
 
 public:
     uint32_t regs[ARMv7_NUM_REGS];
@@ -158,11 +171,12 @@ main(int argc, char **argv)
 	WSADATA wsaData;
 	WSAStartup(MAKEWORD(2, 0), &wsaData);
     FakeARMv7Context *ctx = new FakeARMv7Context();
-    target_ptr ctx_ptr = target_ptr(ctx);
+	target_ptr ctx_ptr = target_ptr(new X86Target());
+	// target_ptr ctx_ptr = target_ptr(ctx);
 
     Server server(ctx_ptr);
 
-    try {
+    // try {
         addr_type pc = TEXT_START;
 
         do {
@@ -174,10 +188,10 @@ main(int argc, char **argv)
                 pc = TEXT_BRANCH_TARGET;
         } while (1);
 
-    } catch (gdb::exception &e) {
-        cerr << e.what() << endl;
-        exit(EXIT_FAILURE);
-    }
+    // } catch (gdb::exception &e) {
+        //cerr << e.what() << endl;
+        //exit(EXIT_FAILURE);
+    // }
 
     return 0;
 }

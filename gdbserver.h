@@ -61,33 +61,40 @@ public:
 	typedef size_t size_type;
 
 	Target(int num_regs)
-		: num_regs(num_regs) { }
+		: _num_regs(num_regs) { }
 
 	/** */
-	virtual void rd_reg(int reg_no) = 0;
+	virtual int rd_reg(int reg_no) = 0;
 	/** */
-	virtual void wr_reg(int reg_no, addr_type value) = 0;
+	virtual int wr_reg(int reg_no, addr_type value) = 0;
 	/** */
-	virtual void rd_mem(addr_type addr) = 0;
+	virtual int rd_mem(addr_type addr) = 0;
 	/** */
-	virtual bool wr_mem(addr_type addr, char data) = 0;
+	virtual int wr_mem(addr_type addr, char data) = 0;
 	/** */
-	virtual void set_breakpoint(addr_type addr, size_type size = 1) = 0;
+	virtual int set_breakpoint(addr_type addr, size_type size = 1) = 0;
 	/** */
-	virtual void del_breakpoint(addr_type addr, size_type size = 1) = 0;
+	virtual int del_breakpoint(addr_type addr, size_type size = 1) = 0;
 	/** */
 	virtual bool has_breakpoint(addr_type addr, size_type size = 1) = 0;
 	/** */
 	virtual const std::string& xml_core(void) = 0;
 
+	virtual int query(const std::string& type) = 0;
+
+	int get_reg_num() const
+	{
+		return _num_regs;
+	}
+
 protected:
 	void put_reg(uint16_t value);
 	void put_reg(uint32_t value);
 	void put_reg(uint64_t value);
-
+	void put_reg(ULONG_PTR value);
 	void put_mem(char value);
+	void put_query_info(const std::string& str);
 
-private:
 	const std::string& rd_one_reg(int reg_no);
 	const std::string& rd_all_regs(void);
 
@@ -95,11 +102,11 @@ private:
 
 	bool wr_mem_size(addr_type addr, size_type size, const char *data);
 
-private:
-	std::string reg_str;
-	std::string mem_str;
-
-	int num_regs;
+protected:
+	std::string		_reg_str;
+	std::string		_mem_str;
+	std::string		_query_str;
+	int				_num_regs;
 };
 
 typedef std::shared_ptr<Target> target_ptr;
@@ -151,8 +158,8 @@ private:
 
 private:
 	target_ptr		_target;
-
-	int socket_fd;
+	mutable bool	_extented;
+	int				_socket_fd;
 };
 
 } /* namespace gdb */

@@ -1,4 +1,6 @@
 #include "win32_x86.h"
+#include <windows.h>
+#include <assert.h>
 
 namespace gdb {
 
@@ -128,39 +130,85 @@ static const int mappings[] =
 
 #endif /* __x86_64__ */
 
-void X86Target::rd_reg(int reg_no)
+X86Target::X86Target() : Target(sizeof(mappings) / sizeof(mappings[0]))
 {
-
+	_ctx.ContextFlags = CONTEXT_ALL;
+	GetThreadContext(GetCurrentThread(), &_ctx);
+	printf("esp: %x, ebp: %x, eip: %x, eax: %x, ebx: %x, ecx: %x, edx: %p, esi: %p, edi: %p, eflag: %x\n",
+		_ctx.Esp, _ctx.Ebp, _ctx.Eip, _ctx.Eax, _ctx.Ebx, _ctx.Ecx, _ctx.Edx, _ctx.Esi, _ctx.Edi, _ctx.EFlags);
 }
 
-void X86Target::wr_reg(int reg_no, unsigned long long value)
+const std::string& X86Target::xml_core(void)
 {
+	static std::string desc;
+	if (desc.size() == 0) {
+		char buf[4096] = { 0 };
+		FILE* fp = fopen("32bit-core.xml", "r");
+		fread(buf, 1, sizeof(buf), fp);
+		fclose(fp);
+		desc = buf;
+	}
 
+	return desc;
 }
 
-void X86Target::rd_mem(addr_type addr)
+int X86Target::rd_reg(int reg_no)
 {
+	if (reg_no > _num_regs)
+		return 14;
 
+	char* p = (char *)&_ctx;
+	put_reg(*(addr_type* )(p + mappings[reg_no]));
+	return 0;
 }
 
-bool X86Target::wr_mem(addr_type addr, char data)
+int X86Target::wr_reg(int reg_no, addr_type value)
 {
-	return false;
+	if (reg_no > _num_regs)
+		return 14;
+	char* p = (char *)&_ctx;
+	*(addr_type* )(p + mappings[reg_no]) = value;
+	return 0;
 }
 
-void X86Target::set_breakpoint(addr_type addr, size_type size)
+int X86Target::rd_mem(addr_type addr)
 {
+	if (IsBadReadPtr((PVOID )addr, 1)) {
+		return -1;
+	}
 
+	put_mem(*(char*)addr);
+	return 0;
 }
 
-void X86Target::del_breakpoint(addr_type addr, size_type size)
+int X86Target::wr_mem(addr_type addr, char data)
 {
+	if (IsBadWritePtr((PVOID)addr, 1)) {
+		return -1;
+	}
 
+	*((char*)addr) = data;
+	return 0;
+}
+
+int X86Target::set_breakpoint(addr_type addr, size_type size)
+{
+	return -1;
+}
+
+int X86Target::del_breakpoint(addr_type addr, size_type size)
+{
+	return -1;
 }
 
 bool X86Target::has_breakpoint(addr_type addr, size_type size)
 {
 	return false;
+}
+
+int X86Target::query(const std::string& type)
+{
+	return -1;
 }
 
 } // namespace gdb {

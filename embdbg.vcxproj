@@ -84,7 +84,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gdbserver.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="win32_x86.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Xml Include="32bit-core.xml" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

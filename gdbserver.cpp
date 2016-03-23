@@ -54,68 +54,81 @@ static std::string bin_to_hex(const char *bin, size_t bin_size)
 static unsigned long str_to_int(const std::string &str, int base = 16)
 {
 	/* TODO Handle different endianess */
-	return strtol(str.c_str(), NULL, base);
+	// reverse byte order only
+	return ntohl(strtol(str.c_str(), NULL, base));
 }
 
 static ULONG_PTR str_to_addr(const std::string &str, int base = 16)
 {
 	/* TODO Handle different endianess */
-	return (ULONG_PTR)strtoull(str.c_str(), NULL, base);
+	// reverse byte order only
+	return (ULONG_PTR )ntohll((ULONG_PTR)strtoull(str.c_str(), NULL, base));
 }
 
 namespace gdb {
 
 void Target::put_reg(uint16_t value)
 {
-	reg_str += bin_to_hex((char *)&value, sizeof(value));
+	_reg_str += bin_to_hex((char *)&value, sizeof(value));
 }
 
 void Target::put_reg(uint32_t value)
 {
-	reg_str += bin_to_hex((char *)&value, sizeof(value));
+	_reg_str += bin_to_hex((char *)&value, sizeof(value));
 }
 
 void Target::put_reg(uint64_t value)
 {
-	reg_str += bin_to_hex((char *)&value, sizeof(value));
+	_reg_str += bin_to_hex((char *)&value, sizeof(value));
+}
+
+void Target::put_reg(ULONG_PTR value)
+{
+	_reg_str += bin_to_hex((char *)&value, sizeof(value));
 }
 
 void Target::put_mem(char value)
 {
-	mem_str += int_to_hex(value >> 4 & 0xf);
-	mem_str += int_to_hex(value >> 0 & 0xf);
+	_mem_str += int_to_hex(value >> 4 & 0xf);
+	_mem_str += int_to_hex(value >> 0 & 0xf);
 }
 
 const std::string& Target::rd_one_reg(int reg_no)
 {
-	reg_str.clear();
+	_reg_str.clear();
 	rd_reg(reg_no);
-	return reg_str;
+	return _reg_str;
 }
 
 const std::string& Target::rd_all_regs(void)
 {
-	reg_str.clear();
-	for (int i = 0; i < num_regs; i++)
+	_reg_str.clear();
+	for (int i = 0; i < _num_regs; i++)
 		rd_reg(i);
-	return reg_str;
+	return _reg_str;
 }
 
 const std::string& Target::rd_mem_size(addr_type addr, size_type size)
 {
-	mem_str.clear();
+	_mem_str.clear();
 	for (size_type i = 0; i < size; i++)
 		rd_mem(addr + i);
-	return mem_str;
+	return _mem_str;
 }
 
 bool Target::wr_mem_size(addr_type addr, size_type size, const char *data)
 {
 	bool success = true;
 	for (size_type i = 0; i < size; i++)
-		success = success && wr_mem(addr + i, data[i]);
+		success = success && wr_mem(addr + i, data[i]) == 0;
 	return success;
 }
+
+void Target::put_query_info(const std::string& str)
+{
+	_query_str += str;
+}
+
 
 /* TODO: This constructor does not properly cleanup after itslef in the case
 	* of an error and is not exception safe. Fix this. It does however report
@@ -124,6 +137,10 @@ bool Target::wr_mem_size(addr_type addr, size_type size, const char *data)
 Server::Server(target_ptr target, const char *port)
 	: _target(target), target_state(TARGET_STATE_HALTED)
 {
+	_extented = false;
+
+	//////////////////////////////////////////////////////////////////////////
+
 	int rc, fd;
 	struct sockaddr_in addr;
 	socklen_t addr_len;
@@ -145,8 +162,8 @@ Server::Server(target_ptr target, const char *port)
 	EXPECT_ERRNO(rc != -1);
 
 	addr_len = sizeof(struct sockaddr_in);
-	socket_fd = accept(fd, (struct sockaddr *)&addr, &addr_len);
-	EXPECT_ERRNO(socket_fd != -1);
+	_socket_fd = accept(fd, (struct sockaddr *)&addr, &addr_len);
+	EXPECT_ERRNO(_socket_fd != -1);
 	closesocket(fd);
 
 	std::cout << "GDB: Accepted connection from "
@@ -158,7 +175,7 @@ Server::Server(target_ptr target, const char *port)
 
 Server::~Server(void)
 {
-	closesocket(socket_fd);
+	closesocket(_socket_fd);
 }
 
 void Server::send_payload(const payload_type &payload, int tries) const
@@ -204,11 +221,12 @@ void Server::send_payload(const payload_type &payload, int tries) const
 
 void Server::send_packet(const char *buf, size_t buf_size) const
 {
+	printf("%s(): '%s'\n", __FUNCTION__, buf);
 	const char *p = buf;
 	size_t s = buf_size;
 
 	while (s > 0) {
-		ssize_t n = send(socket_fd, p, s, 0);
+		ssize_t n = send(_socket_fd, p, s, 0);
 		EXPECT_ERRNO(n != -1);
 		p += n;
 		s -= n;
@@ -243,7 +261,7 @@ void Server::recv_payload(payload_type &payload, int tries) const
 size_t Server::recv_packet(char *buf, size_t buf_size) const
 {
 	ssize_t size;
-	size = recv(socket_fd, buf, buf_size, 0);
+	size = recv(_socket_fd, buf, buf_size, 0);
 	EXPECT_ERRNO(size != -1);
 	return size;
 }
@@ -401,7 +419,7 @@ void Server::wait_for_command(void)
 				addr_type addr = str_to_addr(tok[0]);
 				addr_type size = str_to_addr(tok[1]);
 				uint64_t data = str_to_addr(tok[2]);
-				if (_target->wr_mem_size(addr, size, (const char *)&data))
+				if (_target->wr_mem_size(addr, size, (const char *)&data) != 0)
 					send_ok();
 				else
 					send_error(14);
@@ -426,36 +444,49 @@ void Server::wait_for_command(void)
 			break;
 
 		case 'q':
-			if (payload.substr(1, 9) == "Supported") {
-				send_payload("PacketSize=1024;qXfer:features:read+");
+			if (_target->query(std::string(payload.begin() + 1, payload.end()))) {
 
-			}
-			else if (payload.substr(1, 7) == "Offsets") {
-				send_payload("Text=0;Data=0;Bss=0");
+				if (payload.substr(1, 9) == "Supported") {
+					send_payload("PacketSize=1024;qXfer:features:read+");
 
-			}
-			else if (payload.substr(1, 8) == "Attached") {
-				send_empty();
+				}
+				else if (payload.substr(1, 7) == "Offsets") {
+					send_payload("Text=0;Data=0;Bss=0");
 
-			}
-			else if (payload.substr(1, 1) == "C") {
-				send_payload("QC1");
+				}
+				else if (payload.substr(1, 8) == "Attached") {
+					send_empty();
 
-			}
-			else if (payload.substr(1, 8) == "Symbol::") {
-				send_ok();
+				}
+				else if (payload.substr(1, 1) == "C") {
+					send_payload("QC1");
 
-			}
-			else if (payload.substr(1, 8) == "TStatus") {
-				send_empty();
+				}
+				else if (payload.substr(1, 8) == "Symbol::") {
+					send_ok();
 
+				}
+				else if (payload.substr(1, 8) == "TStatus") {
+					send_empty();
+
+				}
+				else if (payload.substr(1, 29) == "Xfer:features:read:target.xml") {
+					send_payload("l" + _target->xml_core());
+				}
+				else if (payload.substr(1, 11) == "fThreadInfo") {
+					// TODO: query thread info
+					send_empty();
+				}
+				else {
+					THROW("Unsupported 'q' command");
+				}
 			}
-			else if (payload.substr(1, 29) == "Xfer:features:read:target.xml") {
-				send_payload("l" + _target->xml_core());
-			}
-			else {
-				THROW("Unsupported 'q' command");
-			}
+			break;
+
+		case 'T':
+			// TODO: 
+			// Find out if the thread thread-id is alive.
+			send_empty();
 			break;
 
 		case 'v':
@@ -501,6 +532,11 @@ void Server::wait_for_command(void)
 		case '?':
 			/* We are always stopped by a SIGTRAP */
 			send_trapped();
+			break;
+
+		case '!':
+			//  extended mode
+			send_empty();
 			break;
 
 		default:
